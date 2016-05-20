@@ -1,0 +1,216 @@
+-----------------NODE--------------------------
+
+//CORS
+app.use(function (req, res, next) {
+	res.setHeader("Access-Control-Allow-Origin", "*");
+	res.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With,Content-Type, Accept");
+	res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE');
+	next();
+});
+
+//Login
+app.post('/login', function(req, res){
+	var login = req.body.login;
+	var password = req.body.password;
+	var hash = "SELECT password FROM users WHERE login='"+login+"'";
+	connection.query(hash, function(err, rows, fields) {
+		if (rows[0].password != null || rows.length == 0)
+			hash = rows[0].Mdp;
+		else
+			res.end(err);
+	});
+
+	bcrypt.compare(hash, password, function(err, isPasswordMatch) {
+		if (err)
+			res.end(err);
+		var request = "SELECT ID FROM users WHERE login='" + req.body.login + "'";
+		connection.query(request, function(err, rows, fields) {
+			res.end(rows[0].ID);
+		});
+	});
+});
+
+//Register
+app.post('/register', function(req, res){
+	var login = req.body.login;
+	var password = req.body.password;
+	var date = new Date();
+
+	bcrypt.genSalt(10, function(err, salt) {
+		if (err)
+			res.end(1);
+		bcrypt.hash(password, salt, function(err, hash) {
+			if (err)
+				res.end(1);
+			password = hash;
+			var query = "INSERT INTO users (login, password, register_date) VALUES ('"+login+"', '"+password+"', '"+date+"')";
+			connection.query(query, function(err, rows, fields) {
+				if (err != null || rows.length == 0)
+					res.end(1);
+				res.end(0);
+			});
+		});
+	});
+});
+
+//User profile
+app.get('/userinfo/:id', function(req, res) {
+	var data = {
+		"error":1,
+		"response":""
+	};
+	var query = "SELECT * FROM users WHERE ID='" + req.params.id + "'";
+	connection.query(query, function(err, rows, fields){
+
+		if (rows.length != 0) {
+			data["error"] = 0;
+			data["response"] = rows;
+			res.json(data);
+		} else {
+			data["response"] = 'User not found : \'' + req.params.id+ '\'';
+			res.json(data);
+		}
+	});
+});
+
+//Picture
+app.post('/picture', function(req, res){
+	var picture = req.body.picture;
+	var id = req.body.id;
+
+	fs.readFile(req.files.image.path, function (err, data){
+		fs.writeFile(id + "-picture.png", data, function (err) {
+			res.end(err);
+		});
+	});
+});
+
+//CSV
+app.post('/CSV', function (req, res){
+	var csv = req.body.csv;
+	var arr = csv.split(",");
+	var length = arr.length - 2;
+	for (var i = 2; i < (arr.length - 1); i++)
+	{
+		var field = arr[i].split(";");
+		var query = "INSERT INTO csv_data (field0, field1) VALUES ('"+field[0]+"', '"+field[1]+"')";
+		connection.query(query, function(err, rows, fields){
+			if (err != null || rows.length == 0)
+				res.end("1");
+			res.end("0");
+		});
+	}
+	res.end(0);
+}
+-----------------PHP---------------------------
+
+//Image upload
+$target_dir = "uploads/";
+$target_file = $target_dir . basename($_FILES["fileToUpload"]["name"]);
+$uploadOk = 1;
+$imageFileType = pathinfo($target_file, PATHINFO_EXTENSION);
+if (isset($_POST["submit"]))
+{
+	$check = getimagesize($_FILES["fileToUpload"]["tmp_name"]);
+	if ($check === false)
+		echo "Image uploading error: Not an image"
+}
+
+//Payment using braintree
+Braintree_Configuration::environment('sandbox');
+Braintree_Configuration::merchantId('wgnvqdrcv2rmkj25');
+Braintree_Configuration::publicKey('pzjmg79rqwgyyy8p');
+Braintree_Configuration::privateKey('8ee7ea5b01536a1e0fe30e60f4551ef9');
+
+$app->post('/clientToken', function(Request $request) use ($app, $co) {
+	$clientToken = Braintree_ClientToken::generate();
+
+	return $clientToken;
+});
+
+$app->post('/pay', function(Request $request) use ($app, $co) {
+	$nonce = $request->get("payment_method_nonce");
+	$amount = $request->get("amount");
+
+	$result = Braintree_Transaction::sale([
+		'amount' => $amount,
+		'paymentMethodNonce' => $nonce
+		]);
+});
+
+//Login
+$app->post('/login', function (Request $request) use ($app, $co) {
+	$email = $request->get("email");
+	$password = $request->get("password");
+
+	if ($co->query("SELECT * FROM users WHERE email='$email'")->num_rows == 0)
+		return "Error 1";
+	$hash = $co->query("SELECT password FROM users WHERE email='$email'")->fetch_assoc();
+	if (password_verify($password, $hash["password"]))
+	{
+		$ID = $co->query("SELECT ID FROM users WHERE email='$email'")->fetch_assoc()["ID"];
+		return $ID;
+	}
+	else
+		return "Error 2";
+});
+
+//Register
+$app->post('/register', function (Request $request) use ($app, $co) {
+	$email = $request->get("email");
+	$options = [
+	'cost' => 9,
+	];
+	$password = password_hash($request->get("password"), PASSWORD_BCRYPT, $options);
+	$date = date("Y-m-d H:i:s");
+
+  //Mail deja existant
+  If ($co->query("SELECT * FROM users WHERE email='$email'")->num_rows > 0)
+  return "e";
+
+  $co->query("INSERT INTO users (email, password, register_date) VALUES ('$email', '$password', '$date')");
+  $ID = $co->query("SELECT ID FROM users WHERE email='$email'")->fetch_assoc()["ID"];
+  return $ID;
+});
+
+//User profile
+$app->get('/userinfo/{ID}', function ($ID) use ($app, $co) {
+
+	$query = $co->query("SELECT * FROM users LEFT JOIN rating ON ID_rated=users.ID WHERE users.ID='$ID'");
+
+	$response = [];
+	while ($row = $query->fetch_assoc())
+	{
+		$response[] = $row;
+	}
+	$response = new Response(json_encode($response));
+	$response->headers->set('Content-Type', 'application/json');
+
+	return $response;
+});
+
+//GCM using Curl
+function sendGoogleCloudMessage($data, $id)
+{
+	$apiKey = 'My key';
+	$url = 'https://gcm-http.googleapis.com/gcm/send';
+	$post = array('registration_ids'  => $id,
+		'data'              => $data,
+		);
+	$headers = array('Authorization: key=' . $apiKey,
+		'Content-Type: application/json'
+		);
+	$ch = curl_init();
+
+	curl_setopt($ch, CURLOPT_URL, $url);
+	curl_setopt($ch, CURLOPT_POST, true);
+	curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+	curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+	curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($post));
+	$result = curl_exec($ch);
+	if (curl_errno($ch))
+		echo 'GCM error: ' . curl_error($ch);
+	curl_close($ch);
+
+	echo $result;
+}
